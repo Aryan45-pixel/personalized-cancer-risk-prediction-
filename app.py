@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import joblib
+import os
 import plotly.graph_objects as go
 import plotly.express as px
 from tensorflow.keras.models import load_model
@@ -17,9 +18,6 @@ st.set_page_config(
 # ---------------- SESSION STATE ----------------
 if "login" not in st.session_state:
     st.session_state.login = False
-
-if "history" not in st.session_state:
-    st.session_state.history = []
 
 # ---------------- LOGIN PAGE ----------------
 if not st.session_state.login:
@@ -42,9 +40,9 @@ if not st.session_state.login:
 
 # ---------------- LOAD MODELS ----------------
 try:
-    model = joblib.load("trained_model.pkl")
-    encoder = load_model("encoder.h5")
-    scaler = joblib.load("scaler.pkl")
+    model = joblib.load("model/trained_model.pkl")
+    encoder = load_model("model/encoder.h5")
+    scaler = joblib.load("model/scaler.pkl")
 except:
     st.error("Model files not found. Run train_model.py first.")
     st.stop()
@@ -76,11 +74,19 @@ if menu == "Dashboard":
 
     col1.metric("Model Accuracy", "94%")
     col2.metric("ROC-AUC", "0.98")
-    col3.metric("Patients Analysed", len(st.session_state.history))
 
-    if st.session_state.history:
+    # Patient count from CSV
+    if os.path.exists("patient_history.csv"):
+        history_df = pd.read_csv("patient_history.csv")
+        patient_count = len(history_df)
+    else:
+        patient_count = 0
 
-        df = pd.DataFrame(st.session_state.history)
+    col3.metric("Patients Analysed", patient_count)
+
+    if os.path.exists("patient_history.csv"):
+
+        df = pd.read_csv("patient_history.csv")
 
         fig = px.line(df, y="risk", title="Cancer Risk Timeline")
         st.plotly_chart(fig)
@@ -96,7 +102,6 @@ elif menu == "Patient Prediction":
 
     input_values = []
 
-    # use dataset sample as default values
     sample = data.data[0]
 
     for i, f in enumerate(features):
@@ -128,7 +133,6 @@ elif menu == "Patient Prediction":
 
         risk_percent = prob * 100
 
-        # -------- Risk Gauge --------
         fig = go.Figure(go.Indicator(
             mode="gauge+number",
             value=risk_percent,
@@ -145,7 +149,6 @@ elif menu == "Patient Prediction":
 
         st.plotly_chart(fig)
 
-        # -------- Risk Panel --------
         st.subheader("Prediction Result")
 
         if prob >= 0.75:
@@ -177,20 +180,27 @@ elif menu == "Patient Prediction":
 
         st.write("Prediction Probability:", round(prob, 3))
 
-        # save patient history
-        st.session_state.history.append({
+        # -------- SAVE DATA PERMANENTLY --------
+        data_to_save = pd.DataFrame([{
             "patient": patient_id,
             "risk": prob
-        })
+        }])
+
+        file_name = "patient_history.csv"
+
+        if os.path.exists(file_name):
+            data_to_save.to_csv(file_name, mode="a", header=False, index=False)
+        else:
+            data_to_save.to_csv(file_name, index=False)
 
 # ---------------- PATIENT HISTORY ----------------
 elif menu == "Patient History":
 
     st.title("📋 Patient Prediction History")
 
-    if st.session_state.history:
+    if os.path.exists("patient_history.csv"):
 
-        df = pd.DataFrame(st.session_state.history)
+        df = pd.read_csv("patient_history.csv")
 
         st.dataframe(df)
 
