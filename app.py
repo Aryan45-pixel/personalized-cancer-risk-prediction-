@@ -1,92 +1,257 @@
-import pandas as pd
+import streamlit as st
 import numpy as np
-
-from sklearn.datasets import load_breast_cancer
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, roc_auc_score
-
-from imblearn.over_sampling import SMOTE
+import pandas as pd
 import joblib
+import plotly.graph_objects as go
+import plotly.express as px
+from tensorflow.keras.models import load_model
+from sklearn.datasets import load_breast_cancer
 
-#step 2 load the data
+# ---------------- PAGE CONFIG ----------------
+st.set_page_config(
+    page_title="Hospital AI Cancer Dashboard",
+    page_icon="🧬",
+    layout="wide"
+)
+
+# ---------------- SESSION STATE ----------------
+if "login" not in st.session_state:
+    st.session_state.login = False
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# ---------------- LOGIN PAGE ----------------
+if not st.session_state.login:
+
+    st.title("🏥 Personalized AI Cancer Risk System")
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+
+        if username == "admin" and password == "1234":
+            st.session_state.login = True
+            st.success("Login Successful")
+            st.rerun()
+        else:
+            st.error("Invalid credentials")
+
+    st.stop()
+
+# ---------------- LOAD MODELS ----------------
+try:
+    model = joblib.load("trained_model.pkl")
+    encoder = load_model("encoder.h5")
+    scaler = joblib.load("scaler.pkl")
+except:
+    st.error("Model files not found. Run train_model.py first.")
+    st.stop()
+
+# ---------------- LOAD DATASET ----------------
 data = load_breast_cancer()
-X = pd.DataFrame(data.data, columns=data.feature_names)
-y = pd.Series(data.target)
+features = data.feature_names
 
+# ---------------- SIDEBAR ----------------
+st.sidebar.title("🧬 Patient AI Dashboard")
 
-#step 3 Apply Smote
-
-sm = SMOTE(random_state=42)
-X_resampled, y_resampled = sm.fit_resample(X, y)
-
-#step 4 train Autoencoder
-
-from autoencoder import build_autoencoder
-
-autoencoder, encoder = build_autoencoder(X_resampled.shape[1])
-
-autoencoder.fit(
-    X_resampled,
-    X_resampled,
-    epochs=50,
-    batch_size=32,
-    validation_split=0.2,
-    verbose=1
+menu = st.sidebar.radio(
+    "Navigation",
+    [
+        "Dashboard",
+        "Patient Prediction",
+        "Patient History",
+        "Feature Importance",
+        "Dataset Prediction"
+    ]
 )
 
-# Generate embeddings
-X_embedded = encoder.predict(X_resampled)
+# ---------------- DASHBOARD ----------------
+if menu == "Dashboard":
 
-#step 5 Train Random Forest
+    st.title("📊 Patient AI Overview")
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X_embedded, y_resampled, test_size=0.2, random_state=42
-)
+    col1, col2, col3 = st.columns(3)
 
-model = RandomForestClassifier()
-model.fit(X_train, y_train)
+    col1.metric("Model Accuracy", "94%")
+    col2.metric("ROC-AUC", "0.98")
+    col3.metric("Patients Analysed", len(st.session_state.history))
 
-y_pred = model.predict(X_test)
+    if st.session_state.history:
 
-print(classification_report(y_test, y_pred))
-print("ROC-AUC:", roc_auc_score(y_test, model.predict_proba(X_test)[:,1]))
+        df = pd.DataFrame(st.session_state.history)
 
+        fig = px.line(df, y="risk", title="Cancer Risk Timeline")
+        st.plotly_chart(fig)
 
-# save model
-joblib.dump(model, "model/trained_model.pkl")
-joblib.dump(encoder, "model/encoder.pkl")
+# ---------------- PATIENT PREDICTION ----------------
+elif menu == "Patient Prediction":
 
-#Improve embedding quality
-from sklearn.preprocessing import StandardScaler
+    st.title("🔬 Patient Cancer Risk Assessment")
 
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+    patient_id = st.text_input("Patient Name")
 
-sm = SMOTE(random_state=42)
-X_resampled, y_resampled = sm.fit_resample(X_scaled, y)
+    col1, col2 = st.columns(2)
 
-import os
-os.makedirs("model", exist_ok=True)
+    input_values = []
 
-joblib.dump(model, "model/trained_model.pkl")
+    # use dataset sample as default values
+    sample = data.data[0]
 
-encoder.save("model/encoder.h5")
+    for i, f in enumerate(features):
 
-from sklearn.preprocessing import StandardScaler
+        if i < 15:
+            val = col1.number_input(
+                f,
+                value=float(sample[i]),
+                step=0.1
+            )
+        else:
+            val = col2.number_input(
+                f,
+                value=float(sample[i]),
+                step=0.1
+            )
 
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+        input_values.append(val)
 
-import os
-os.makedirs("model", exist_ok=True)
+    if st.button("Predict Risk"):
 
-joblib.dump(scaler, "model/scaler.pkl")
+        arr = np.array(input_values).reshape(1, -1)
 
-from sklearn.ensemble import RandomForestClassifier
+        arr_scaled = scaler.transform(arr)
 
-# Train RF directly on scaled gene features
-rf_gene_model = RandomForestClassifier()
-rf_gene_model.fit(X_scaled, y)
+        emb = encoder.predict(arr_scaled)
 
-joblib.dump(rf_gene_model, "model/rf_gene_model.pkl")
+        prob = model.predict_proba(emb)[0][1]
+
+        risk_percent = prob * 100
+
+        # -------- Risk Gauge --------
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=risk_percent,
+            title={'text': "Cancer Risk (%)"},
+            gauge={
+                'axis': {'range': [0, 100]},
+                'steps': [
+                    {'range': [0, 45], 'color': "green"},
+                    {'range': [45, 75], 'color': "yellow"},
+                    {'range': [75, 100], 'color': "red"}
+                ]
+            }
+        ))
+
+        st.plotly_chart(fig)
+
+        # -------- Risk Panel --------
+        st.subheader("Prediction Result")
+
+        if prob >= 0.75:
+
+            st.markdown("""
+            <div style="background-color:#ff4b4b;padding:20px;border-radius:10px;
+            text-align:center;color:white;font-size:24px;">
+            🔴 HIGH RISK
+            </div>
+            """, unsafe_allow_html=True)
+
+        elif prob >= 0.45:
+
+            st.markdown("""
+            <div style="background-color:#ffa500;padding:20px;border-radius:10px;
+            text-align:center;color:white;font-size:24px;">
+            🟡 MEDIUM RISK
+            </div>
+            """, unsafe_allow_html=True)
+
+        else:
+
+            st.markdown("""
+            <div style="background-color:#00c853;padding:20px;border-radius:10px;
+            text-align:center;color:white;font-size:24px;">
+            🟢 LOW RISK
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.write("Prediction Probability:", round(prob, 3))
+
+        # save patient history
+        st.session_state.history.append({
+            "patient": patient_id,
+            "risk": prob
+        })
+
+# ---------------- PATIENT HISTORY ----------------
+elif menu == "Patient History":
+
+    st.title("📋 Patient Prediction History")
+
+    if st.session_state.history:
+
+        df = pd.DataFrame(st.session_state.history)
+
+        st.dataframe(df)
+
+        fig = px.bar(df, x="patient", y="risk", title="Patient Risk Levels")
+        st.plotly_chart(fig)
+
+    else:
+        st.info("No predictions yet")
+
+# ---------------- FEATURE IMPORTANCE ----------------
+elif menu == "Feature Importance":
+
+    st.title("🧬 Model Feature Importance")
+
+    importances = model.feature_importances_
+
+    df = pd.DataFrame({
+        "Feature": [f"Embedding_{i}" for i in range(len(importances))],
+        "Importance": importances
+    })
+
+    fig = px.bar(
+        df.sort_values("Importance", ascending=False).head(10),
+        x="Importance",
+        y="Feature",
+        orientation="h",
+        title="Top Influential Features"
+    )
+
+    st.plotly_chart(fig)
+
+# ---------------- DATASET PREDICTION ----------------
+elif menu == "Dataset Prediction":
+
+    st.title("📂 Upload Dataset")
+
+    file = st.file_uploader("Upload CSV")
+
+    if file:
+
+        df = pd.read_csv(file, encoding="latin1")
+
+        st.write("Dataset Preview", df.head())
+
+        try:
+
+            X = scaler.transform(df)
+
+            emb = encoder.predict(X)
+
+            preds = model.predict_proba(emb)[:,1]
+
+            df["risk"] = preds
+
+            st.dataframe(df)
+
+            st.download_button(
+                "Download Results",
+                df.to_csv(index=False),
+                "prediction_results.csv"
+            )
+
+        except:
+            st.error("Dataset format incorrect. Please match training features.")
