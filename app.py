@@ -40,9 +40,9 @@ if not st.session_state.login:
 
 # ---------------- LOAD MODELS ----------------
 try:
-    model = joblib.load("model/trained_model.pkl")
-    encoder = load_model("model/encoder.h5")
-    scaler = joblib.load("model/scaler.pkl")
+    model = joblib.load("trained_model.pkl")
+    encoder = load_model("encoder.h5")
+    scaler = joblib.load("scaler.pkl")
 except:
     st.error("Model files not found. Run train_model.py first.")
     st.stop()
@@ -265,3 +265,4 @@ elif menu == "Dataset Prediction":
 
         except:
             st.error("Dataset format incorrect. Please match training features.")
+
